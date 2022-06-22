@@ -1,0 +1,10 @@
+calendar:
+  url: https://yourcloud.com/remote.php/dav/calendars/
+  username: USERNAME
+  password: PASSWORD
+  name: Personal
+sources:
+  - https://source.domain/ical.ics
+range:
+  min: 30
+  max: 120

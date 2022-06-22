@@ -7,26 +7,33 @@ If you make any improvements, please share them!
 """
 import caldav
 from datetime import datetime, timedelta
-# Yes, this library needs two import lines to allow importing of all necessary bits
-# It is indeed missing an __init__.py file
-from icalevents import icalevents as ical
-from icalevents.icalparser import Event as ICalEvent
+import ics
 from collections import namedtuple
 import uuid
 from urllib.parse import quote
+import sys
 import re
+import requests
+import yaml
 
-# TODO: Set the information in this section
-USERNAME = "Calendar"
-PASSWORD = "PASSWORD"
-HOST = "https://yourcloud.com/remote.php/dav/calendars/{}".format(USERNAME)
-TARGET = "Personal"
 
-ICAL_SOURCES = [
-    # TODO: Add your ical sources here
-]
-RANGE = [timedelta(days=-30), timedelta(days=120)]
+def printf(*args, **kwargs):
+    kwargs.update({"end": "", "flush": True})
+    print(*args, **kwargs)
 
+
+with open(sys.argv[-1], "r") as fi:
+    config = yaml.load(fi, yaml.CLoader)
+
+HOST = config["calendar"]["url"]
+USERNAME = config["calendar"]["username"]
+PASSWORD = config["calendar"]["password"]
+TARGET = config["calendar"]["name"]
+
+ICAL_SOURCES = config["sources"]
+RANGE_MIN, RANGE_MAX = config["range"]["min"], config["range"]["max"]
+
+printf("Connecting to calendar host... ")
 client = caldav.DAVClient(url=HOST, username=USERNAME, password=PASSWORD)
 principal = client.principal()
 
@@ -34,9 +41,13 @@ if TARGET not in [calendar.name for calendar in principal.calendars()]:
     target: caldav.Calendar = principal.make_calendar(TARGET)
 else:
     target: caldav.Calendar = principal.calendar(TARGET)
+printf("Done.\n")
 
+printf("Deleting existing events...")
 for event in target.events():  # type: caldav.Event
+    printf(".")
     event.delete()
+printf("Done.\n")
 
 url = namedtuple("Url", ["path"])
 
@@ -84,15 +95,18 @@ def _create(self, data, id=None, path=None):
 
 caldav.CalendarObjectResource._create = _create
 
-for source in ICAL_SOURCES:
-    events = ical.events(source, start=datetime.now() + RANGE[0], end=datetime.now() + RANGE[1])
-    for event in events:  # type: ICalEvent
+for i, source in enumerate(ICAL_SOURCES):
+    printf("Syncing Calendar {}...".format(i))
+    ical = ics.Calendar(requests.get(source).text)
+    for event in ical.events:  # type: ics.Event
         # TODO: This is a filter used by the author, not mandatory
         if event.all_day:
             continue
         target.save_event(
             # TODO: Improve this code when icalevents and caldav start playing nice with one another
-            dtstart=event.start if not event.all_day else event.start.date(),
-            dtend=event.end if not event.all_day else None,
-            summary=event.summary if event.summary in ("Free", "Busy", "Away", "Tentative", "Working elsewhere") else "Busy",
+            dtstart=event.begin.datetime if not event.all_day else event.begin.datetime.date(),
+            dtend=event.end.datetime if not event.all_day else None,
+            summary=event.description if event.description in ("Free", "Busy", "Away", "Tentative", "Working elsewhere") else "Busy",
         )
+        printf(".")
+    printf("Done.\n")
